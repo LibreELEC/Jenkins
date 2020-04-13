@@ -1,0 +1,418 @@
+#!/bin/bash -xe
+
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2020-present Team LibreELEC (https://libreelec.tv)
+
+
+# This function build the environment property file. Used throughout the Jenkins job. It also
+# creates the history property file. Used for reference of variable updates throughout the build
+function_prop() {
+    arg1="$1"
+    arg2="$2"
+    sed -i "/${arg1}/d" env.properties
+    echo "${arg1} = ${arg2}" >> env.properties
+    echo "${arg1} = ${arg2}" >> history.properties
+}
+
+# Work out the proper device and arch for the image using the job name
+function_image() {
+    DEVICE=`find projects -name "${PROJECT}" -print | tail -n 1 | awk -F"/" '{print $4}' | tr -d '[:space:]'`
+    [ -z "${DEVICE}" ] && DEVICE=EMPTY && PROJECT="${PROJECT}" || PROJECT=`find projects -name "${PROJECT}" -print | tail -n 1 | awk -F"/" '{print $2}' | tr -d '[:space:]'`
+
+    ARCH=`grep -o "x86_64" projects/${PROJECT}/options | tr -d '[:space:]'`
+    [ -z "${ARCH}" ] && ARCH="arm"; echo ${ARCH}; function_prop ARCH "${ARCH}" || ARCH="x86_64"; echo ${ARCH}; function_prop ARCH "${ARCH}"
+}
+
+# End the build if we come across any failures
+function_end() {
+    arg1="$1"
+    arg2="$2"
+    URL="${arg2}"
+
+    # The groovy post plugin pulls in files, variables and executes scripts on the master. But everything we need is on a slave. So we
+    # copy what we need in the properties file to the master but first we delete anything that already exists. To keep things simple
+    # we will copy the files to the same directory path that exists on the slave
+    ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+    ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+    scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+
+    # Now we exit since we don't need to continue. The build will be marked as unstable instead of failure
+    exit $(expr ${arg1} + 0)
+}
+
+# Process the build to determine if it were successful or not
+function_process() {
+    arg1="$1"
+    arg2="$2"
+    if [[ "${arg1}" == "0" ]]; then
+        CNT=`awk -vORS=', ' '{ print $1 }' build.LibreELEC-${DEF}.${ARCH}-${LE_VER}-devel/.threads/addons.failed 2>/dev/null | sed 's/, $//' | wc -w`
+        if [[ ${CNT} -eq 0 ]]; then
+            export URL="${DEF} | Success"; function_prop URL "${URL}"
+            PASS=0; function_prop PASS "${PASS}"
+        elif [[ ${CNT} -gt 0 ]]; then
+            ILOG=`awk -vORS=', ' '{ print $1 }' build.LibreELEC-${DEF}.${ARCH}-${LE_VER}-devel/.threads/addons.failed 2>/dev/null | sed 's/, $//'`
+            export URL="${DEF} | Failed: ${ILOG}"; function_prop URL "${URL}"
+            PASS=0; function_prop PASS "${PASS}"
+        fi
+    elif [[ "${arg1}" == "9999" ]]; then
+        export URL="${DEF} | ${arg2}" | sed -e 's/^| //'; function_prop URL "${URL}"
+        PASS=3; function_prop PASS "${PASS}"
+        function_end "${PASS}" "${URL}"
+    else
+        ILOG="UNKNOWN BUILD FAILURE OR INABILITY TO GENERATE PLAN"
+        export URL="${DEF} | ${ILOG}" | sed -e 's/^| //'; function_prop URL "${URL}"
+        PASS=3; function_prop PASS "${PASS}"
+        function_end "${PASS}" "${URL}"
+    fi
+}
+
+# Clone LibreELEC and checkout selected branch, or pull request. Depending on the plugin(s)
+# we want to build
+if [[ "${Type}" == "Tag" ]]; then
+    BRANCH="${TAG}"
+elif [[ "${Type}" == "Branch" ]]; then
+    BRANCH="${BRANCH}"
+else
+    BRANCH=""
+fi
+
+if [[ "${PLUGIN}" == "" ]]; then
+    PLUGIN="${AddonType}"
+fi
+
+if [[ "${BRANCH}" != "" ]]; then
+    if [[ "${Clean}" == "make_distclean" ]]; then
+        [[ -d LibreELEC.tv ]] && rm -Rf LibreELEC.tv
+        git clone https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+        ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+        if [[ "${ILOG}" != "" ]]; then
+            URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory"; function_prop URL "${URL}"
+            function_process 9999 "${URL}"
+        fi
+    else
+        if [[ ! -d LibreELEC.tv ]]; then
+            git clone https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+            ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+            if [[ "${ILOG}" != "" ]]; then
+                URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory"; function_prop URL "${URL}"
+                function_process 9999 "${URL}"
+            fi
+        else
+            if [[ ! "$(ls -A LibreELEC.tv/packages)" ]]; then
+                rm -Rf LibreELEC.tv
+                git clone https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+                ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+                if [[ "${ILOG}" != "" ]]; then
+                    URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory"; function_prop URL "${URL}"
+                    function_process 9999 "${URL}"
+                fi
+            fi
+        fi
+    fi
+    export GC=""
+    export PR=""
+    export MARK="${BRANCH}"
+    cd LibreELEC.tv
+    git checkout "${BRANCH}"
+elif [[ "${PRBUILD}" == "true" ]]; then
+    if [[ "${Clean}" == "make_distclean" ]]; then
+        [[ -d LibreELEC.tv ]] && rm -Rf LibreELEC.tv
+        git clone -n https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+        ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+        if [[ "${ILOG}" != "" ]]; then
+            URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory."; function_prop URL "${URL}"
+            function_process 9999 "${URL}"
+        fi
+    else
+        if [[ ! -d LibreELEC.tv ]]; then
+            git clone https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+            ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+            if [[ "${ILOG}" != "" ]]; then
+                URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory."; function_prop URL "${URL}"
+                function_process 9999 "${URL}"
+            fi
+        else
+            if [[ ! "$(ls -A LibreELEC.tv/packages)" ]]; then
+                rm -Rf LibreELEC.tv
+                git clone https://github.com/LibreELEC/LibreELEC.tv.git 2>&1 | tee extra_build.log
+                ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+                if [[ "${ILOG}" != "" ]]; then
+                    URL="${PROJECT} | fatal: destination path 'LibreELEC.tv' already exists and is not an empty directory"; function_prop URL "${URL}"
+                    function_process 9999 "${URL}"
+                fi
+            fi
+        fi
+    fi
+    export ALPHA=false
+    export GC=""
+    export MARK="${PR}"
+    cd LibreELEC.tv
+    git fetch origin pull/"${PR}"/head:"${PR}" 2>&1 | tee extra_build.log
+    ILOG=`grep "fatal:" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+    if [[ "${ILOG}" != "" ]]; then
+        URL="${PROJECT} | fatal: Refusing to fetch into current branch refs/heads/${PR} of non-bare repository"; function_prop URL "${URL}"
+        function_process 9999 "${URL}"
+    fi
+    git checkout "${PR}"
+fi
+
+# Prepare property files
+touch env.properties
+touch history.properties
+
+# build slack channel (we need to convert the string to lower case for slack)
+# For some reason this isn't working but works when we create an image. We
+# will leave it here for now and hard code the channel in the template.
+if [[ "${PRBUILD}" == "true" ]]; then
+    SLACK="${PROJECT,,}"
+    export SLACK="#buildserver-${SLACK}"; function_prop SLACK "${SLACK}"
+else
+    export SLACK="#addon-notifications"; function_prop SLACK "${SLACK}"
+fi
+
+function_prop MARK "${MARK}"
+
+# For template use
+export PLUGIN=${PLUGIN}; function_prop PLUGIN "${PLUGIN}"
+
+# Determine if we are packaging add-ons for Jenkins or not
+if [[ "${JENKINS_ADDON,,}" == "yes" ]]; then
+    export JADDON="jenkins"; function_prop JADDON "${JADDON}"
+    JENKINS_ADDON=yes
+else
+    export JADDON="addons"; function_prop JADDON "${JADDON}"
+    JENKINS_ADDON=no
+fi
+
+function_image
+
+# Assign the appropriate variables based on project selection
+if [[ "${DEVICE}" == EMPTY ]]; then
+    export PROJECT="${PROJECT}"; function_prop PROJECT "${PROJECT}"
+    export DEF="${PROJECT}"; function_prop DEF "${PROJECT}"
+    [ "${BRANCH}" == "master" ] && [ "${PROJECT}" == "Amlogic" ] && PROJECT="Amlogic_Legacy"; function_prop PROJECT "${PROJECT}"
+    DEVICE=""
+else
+    export PROJECT="${PROJECT}"; function_prop PROJECT "${PROJECT}"
+    export DEVICE="${DEVICE}"; function_prop DEVICE "${DEVICE}"
+    export DEF="${DEVICE}"; function_prop DEF "${DEVICE}"
+fi
+
+# Determine if a valid project and branch selected
+if [[ ! -f projects/${PROJECT}/options ]]; then
+    if [[ ! -f projects/${PROJECT}/devices/${DEF}/options ]]; then
+        URL=`echo "${PROJECT} | ERROR: Project not found, use a valid project or create a new config" | sed '$!{:a;N;s/\n/\t/;ta}'`; function_prop URL "${URL}"
+        function_process 9999 "${URL}"
+    fi
+fi
+
+
+# This is to support the nightly add-on builds where the project is already preselected
+if [[ "${JOB_BASE_NAME}" == *"${DEF}"* ]]; then
+    export JADDON="addons"; function_prop JADDON "${JADDON}"
+    JENKINS_ADDON=yes
+fi
+
+# We can only build one PR plugin at a time. If a PLUGIN that contains the possibility of building more than
+# one exists, we abort because we cannot handle it.
+if [[ "${PRBUILD}" == "true" ]]; then
+    if [[ "${PLUGIN}" == "all" ]] || [[ "${PLUGIN}" == "official" ]] || [[ "${PLUGIN}" == "binary" ]]; then
+        URL="${DEF} | WARNING: Only one add-on can be selected when building a PR"; function_prop URL "${URL}"
+        function_process 9999 "${URL}"
+    fi
+fi
+
+# PR plugins are built individually. In order to determine the proper category and arch, we need to figure it out
+# from the package.mk file
+if [[ "${PRBUILD}" == "true" ]] || [[ "${PLUGIN}" != "all" ]] || [[ "${PLUGIN}" != "official" ]] || [[ "$PLUGIN}" != "binary" ]]; then
+    PKG=`cat packages/addons/**/${PLUGIN}/package.mk | grep '^PKG_SECTION' | head -n 1 | awk -F"\"" '{print $2}'`
+    if [[ "${PKG}" == "" ]]; then
+        CATD="EMPTY"
+    fi
+
+
+    if [[ "${CATD}" == "EMPTY" ]]; then
+        export CATEGORY=`echo ${PLUGIN} | awk -F. '{print $1}'`; function_prop CATEGORY "${CATEGORY}"
+    else
+        export CATEGORY=`cat packages/addons/**/${PLUGIN}/package.mk | grep "^PKG_SECTION" | head -n 1 | awk -F'"' '{print $2}' | sed -e 's/\//./g' | awk -F. '{print $1}'`
+        if [[ "${CATEGORY}" == "virtual" ]]; then
+            export CATEGORY=tools ; echo ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
+        else
+            export ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
+        fi
+    fi
+
+    [ ! -f "packages/addons/${CATEGORY}/${PLUGIN}/package.mk" ] && (echo "Mark as unstable"; exit 0)
+
+    # Check if architure matches
+    if [[ "${PLUGIN}" != "all" ]]; then
+        if [[ "${PLUGIN}" != "official" ]]; then
+            if [[ "${PLUGIN}" != "binary" ]]; then
+                export BUILD_CHECK=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_ARCH" | head -n 1 | awk -F"\"" '{print $2}'`
+
+                if [[ "${BUILD_CHECK}" != "${ARCH}" ]] && [[ "${BUILD_CHECK}" != "any" ]]; then
+                    export URL="${DEF} | Selected architecture ${ARCH}, doesn't match add-on package architecture ${BUILD_CHECK}"
+                    function_prop URL "${URL}"
+                    function_process 9999 "${URL}"
+                fi
+            fi
+        fi
+    fi
+fi
+
+# Set URL variable so that it is populated with the device if the build fails.
+export URL="${DEF} ${URL}"; function_prop URL "${DEF}"
+
+# Export variables so they can be used in the build and export them to the env.properties file
+export R=`git rev-list HEAD --count`; function_prop HEAD "r${R}"
+export LE_VER=`cat distributions/LibreELEC/version | grep OS_VERSION | awk -F"\"" '{print $2}' | tail -n 1`; function_prop LE_VER "${LE_VER}"
+export ADDON_VER=`cat distributions/LibreELEC/version | grep ADDON_VERSION | awk -F"\"" '{print $2}' | tail -n 1`; function_prop ADDON_VER "${ADDON_VER}"
+
+# Construct the plugin directory name
+export PLUGIN_DIR=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_SECTION" | head -n 1 | awk -F"\"" '{print $2}' | sed -e 's/\//./g'`; echo ${PLUGIN_DIR}
+export PLUGIN_DIR=${PLUGIN_DIR}.${PLUGIN}; function_prop PLUGIN_DIR "${PLUGIN_DIR}"
+
+# Setup the add-on name for the PR
+if [[ "${PRBUILD}" == "true" ]]; then
+    export REV=`grep "PKG_REV=" < packages/addons/$CATEGORY/$PLUGIN/package.mk`
+    sed -i -e s/"${REV}"/PKG_REV=\"PR${PR}\"/ packages/addons/$CATEGORY/$PLUGIN/package.mk
+    export REV=`grep "PKG_REV=" < packages/addons/$CATEGORY/$PLUGIN/package.mk`; function_prop REV "${REV}"
+    export PLUGIN_NAME=`echo ${PLUGIN_DIR}-${ADDON_VER}.PR${PR}.zip`; function_prop PLUGIN_NAME "${PLUGIN_NAME}"
+else
+    export REV=`grep "PKG_REV=" < packages/addons/$CATEGORY/$PLUGIN/package.mk | awk -F"\"" '{print $2}'`; function_prop REV "${REV}"
+    export PLUGIN_NAME=`echo ${PLUGIN_DIR}-${ADDON_VER}.${REV}.zip`; function_prop PLUGIN_NAME "${PLUGIN_NAME}"
+fi
+
+
+# Save current GIT info to the properties file
+export LE_GIT_BRANCH=${BRANCH}; function_prop LE_GIT_BRANCH "${LE_GIT_BRANCH}"
+export LE_GIT_COMMIT=`git rev-parse --verify HEAD`; function_prop LE_GIT_COMMIT "${LE_GIT_COMMIT}"
+export LE_GIT_PREVIOUS_COMMIT=`git log -p | grep -v ${LE_GIT_COMMIT} | grep commit | head -n 1 | awk -F" " '{print $2}'`; function_prop LE_GIT_PREVIOUS_COMMIT "${LE_GIT_PREVIOUS_COMMIT}"
+export LE_GIT_URL=`git remote -v | sed -n '/github.com.*push/{s/^[^[:space:]]\+[[:space:]]\+//;s|git@github.com:|https://github.com/|;s/\.git.*//;p}' | tail -n 1`; function_prop LE_GIT_URL "${LE_GIT_URL}"
+export LE_GIT_COMMIT_MESSAGE=`git log -1 --pretty=%B`; function_prop LE_GIT_MESSAGE "${LE_GIT_MESSAGE}"
+export GIT_BRANCH=${LE_GIT_BRANCH}
+export GIT_COMMIT=${LE_GIT_COMMIT}
+export GIT_PREVIOUS_COMMIT=${LE_GIT_PREVIOUS_COMMIT}
+
+# Build the Jenkins add-on zip filename, this is to be used for the transfer to releases server add-on staging folder.
+JADDON_NAME=${LE_VER}-${DEF}-${ARCH}-${PLUGIN_NAME}; function_prop JADDON_NAME "${JADDON_NAME}"
+
+# Set default build parameters when triggered by SCM change
+if [[ "${BUILD_CAUSE}" == "SCMTRIGGER" || "${BUILD_CAUSE}" == "TIMERTRIGGER" ]]; then
+    CONCURRENCY_MAKE_LEVEL=4
+    PERIODIC=nightly
+fi
+
+# Disable ccache on all builds, this may inadvertently cause builds to fail due to the number of builds we run.
+export CCACHE_DISABLE=1; function_prop CCACHE_DISABLE 1
+
+# Determine which build server we are on to define SOURCES and TARGET"
+if [[ "${BRANCH}" != "" ]]; then
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}"/all_addons
+    elif [[ "$NODE_NAME}" =~ build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}"/all_addons
+    else
+        TARGET_DIR="target"
+        SOURCES_DIR="sources"
+    fi
+elif [[ "${PRBUILD}" == "true" ]]; then
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}/PR"
+    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}/PR"
+    fi
+fi
+
+Remove_Previous_Plugin="${Remove_Previous_Plugin,,}"; function_prop Remove_Previous_Plugin "${Remove_Previous_Plugin}"
+
+# Cleanup the build log file if it previously exists. If we don't we may produce false failures when builds fail without a real FAILURE:
+ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+
+# Setup target directories to be sure they exist
+mkdir -p "${TARGET_DIR}"
+
+# Now build the plugins
+[[ -f extra_build.log ]] && rm -Rf extra_build.log || true
+if [[ "${PRBUILD}" == "true" ]]; then
+    PROJECT=${PROJECT} DEVICE=${DEVICE} ARCH=${ARCH} SOURCES_DIR=${SOURCES_DIR} TARGET_DIR=${TARGET_DIR} CONCURRENCY_MAKE_LEVEL=${CONCURRENCY_MAKE_LEVEL} ADDON_JENKINS=${JENKINS_ADDON} ADDON_OVERWRITE=${Remove_Previous_Plugin} scripts/create_addon ${PLUGIN} 2>&1 | tee extra_build.log
+else
+    PROJECT=${PROJECT} DEVICE=${DEVICE} ARCH=${ARCH} SOURCES_DIR=${SOURCES_DIR} TARGET_DIR=${TARGET_DIR} CONCURRENCY_MAKE_LEVEL=${CONCURRENCY_MAKE_LEVEL} ADDON_JENKINS=${JENKINS_ADDON} ADDON_OVERWRITE=${Remove_Previous_Plugin} scripts/create_addon ${AddonType} 2>&1 | tee extra_build.log # removed -mono -webgrabplus
+fi
+
+function_process 0
+
+
+# Save the target and sources directory info to the properties list
+export TARGET_DIR="${TARGET_DIR}"; function_prop TARGET_DIR "${TARGET_DIR}"
+export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
+
+# Determine which server we are copying the add-ons to
+if [[ "${JOB_BASE_NAME}" == "All_Add-ons" ]]; then
+    SRV=${ADDONSERVER}
+    UDIR="/addons-staging"
+else
+    SRV=${WEBSERVER}
+    UDIR="/"
+fi
+
+# Copy the add-ons to the proper server
+if [[ "${BRANCH}" != "" ]]; then
+    if [[ "$PASS" == "0" ]]; then
+        if [[ "${Remove_Previous_Plugin}" == "yes" ]]; then
+            if [[ "${PLUGIN}" != "all" ]]; then
+                if [[ "${PLUGIN}" != "official" ]]; then
+                    if [[ "${PLUGIN}" != "binary" ]]; then
+                        ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                        AddonList=`ls "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-*`
+                        for i in ${AddonList}
+                        do
+                            echo ${i}
+                            scp -P 4567 -p ${i} jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                            rm ${i} || true
+                        done
+                   else
+                        ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                        scp -P 4567 -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                        rm "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" || true
+                        URL="${DEF} | Success: ${PLUGIN} - single plugin build"; function_prop URL "${URL}"
+                   fi
+                fi
+            fi
+        else
+            URL="${URL} | Jenkins add-ons not built, not copied"; function_prop URL "${URL}"
+        fi
+    else
+        URL="UNKNOWN BUILD FAILURE OR INABILITY TO GENERATE PLAN"; function_prop URL "${URL}"
+        function_process 9999 "${URL}"
+    fi
+elif [[ "${PRBUILD}" == "true" ]]; then
+    if [[ "${PASS}" == "0" ]]; then
+        export URL="${DEF} PR#${PR} ${PLUGIN} | Success: ${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}"; function_prop URL "${URL}"
+        export URLGROOVY="${DEF} PR#${PR} ${PLUGIN} | Success: <a href=http://${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}> here </a> for download."; function_prop URLGROOVY "${URLGROOVY}"
+
+        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}" || true
+        scp -P 4567 -p ${TARGET_DIR}/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} jenkins@${WEBSERVER}:/var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} || true
+    else
+        echo "Build failed, not removing previous PR from web server."
+        export URL="${DEF} | Failed: PR#${PR} ${PLUGIN}"; function_prop URL "${URL}"
+        export URLGROOVY="${DEF} | Failed: PR#${PR} ${PLUGIN}"; function_prop URLGROOVY "${URLGROOVY}"
+    fi
+fi
+
+# Cleanup the workspace
+if [[ "${Clean}" == "make_distclean" ]]; then
+    sleep 15
+    rm -R packages/*
+    make distclean
+elif [[ "${Clean}" == "make_clean" ]]; then
+    make clean
+else
+    echo "Not cleaning build"
+fi
+
+printenv
