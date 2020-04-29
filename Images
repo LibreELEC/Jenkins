@@ -1,0 +1,612 @@
+#!/bin/bash -xe
+
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2020-present Team LibreELEC (https://libreelec.tv)
+
+# Clone LibreELEC and checkout selected branch, git commit or pull request. Depending on the image
+# we want to build
+[[ -f env.properties ]] && rm -rf env.properties || true
+
+if [[ "${Type}" == "Tag" ]]; then
+    BRANCH="${TAG}"
+elif [[ "${Type}" == "Branch" ]]; then
+    BRANCH="${BRANCH}"
+else
+    BRANCH=""
+fi
+
+if [[ "${BRANCH}" != "" ]]; then
+    if [[ "${Clean}" == "make_distclean" ]]; then
+        [[ -d LibreELEC.tv ]] && rm -Rf LibreELEC.tv
+        git clone https://github.com/LibreELEC/LibreELEC.tv.git
+    else
+        if [[ ! -d LibreELEC.tv ]]; then
+            git clone https://github.com/LibreELEC/LibreELEC.tv.git
+        else
+            if [[ ! "$(ls -A LibreELEC.tv/packages)" ]]; then
+                rm -Rf LibreELEC.tv
+                git clone https://github.com/LibreELEC/LibreELEC.tv.git
+            fi
+        fi
+    fi
+    export GC=""
+    export PR=""
+    export MARK="${BRANCH}"
+    cd LibreELEC.tv
+    git checkout "${BRANCH}"
+elif [[ "${GC}" != "" ]]; then
+    if [[ "${Clean}" == "make_distclean" ]]; then
+        [[ -d LibreELEC.tv ]] && rm -Rf LibreELEC.tv
+        git clone https://github.com/LibreELEC/LibreELEC.tv.git
+    else
+        if [[ ! -d LibreELEC.tv ]]; then
+            git clone https://github.com/LibreELEC/LibreELEC.tv.git
+        else
+            if [[ ! "$(ls -A LibreELEC.tv/packages)" ]]; then
+                rm -Rf LibreELEC.tv
+                git clone https://github.com/LibreELEC/LibreELEC.tv.git
+            fi
+        fi
+    fi
+    export ALPHA=false
+    export PR=""
+    export MARK="${GC}"
+    cd LibreELEC.tv
+    git checkout "${GC}"
+elif [[ "${PR}" != "" ]]; then
+    if [[ "${Clean}" == "make_distclean" ]]; then
+        [[ -d LibreELEC.tv ]] && rm -Rf LibreELEC.tv
+        git clone https://github.com/LibreELEC/LibreELEC.tv.git
+    else
+        if [[ ! -d LibreELEC.tv ]]; then
+            git clone https://github.com/LibreELEC/LibreELEC.tv.git
+        else
+            if [[ ! "$(ls -A LibreELEC.tv/packages)" ]]; then
+                rm -Rf LibreELEC.tv
+                git clone https://github.com/LibreELEC/LibreELEC.tv.git
+            fi
+        fi
+    fi
+    export ALPHA=false
+    export GC=""
+    export MARK="${PR}"
+    cd LibreELEC.tv
+    git fetch origin pull/"${PR}"/head:"${PR}"
+    git checkout "${PR}"
+fi
+
+# Prepare property files
+touch env.properties
+touch history.properties
+
+# This function build the environment property file. Used throughout the Jenkins job. It also
+# creates the history property file. Used for reference of variable updates throughout the build
+function_prop() {
+    arg1="$1"
+    arg2="$2"
+    sed -i "/${arg1}/d" env.properties
+    echo "${arg1} = ${arg2}" >> env.properties
+    echo "${arg1} = ${arg2}" >> history.properties
+}
+
+function_prop MARK "${MARK}"
+
+# Determine that valid parameters were provided to the build, if not exit
+[ "${GC}" == "" ] &&
+[ "${PR}" == "" ] &&
+[ "${BRANCH}" != "master" ] &&
+[ "${ALPHA}" == "true" ] &&
+[ "${ALPHA_VERSION}" == "" ] ||
+
+[ "${GC}" == "" ] &&
+[ "${PR}" == "" ] &&
+[ "${BRANCH}" != "master" ] ||
+[ "${ALPHA}" == "true" ] &&
+[ "${ALPHA_VERSION}" == "" ] ||
+
+[ "${GC}" == "" ] &&
+[ "${PR}" == "" ] &&
+[ "${BRANCH}" != "master" ] &&
+[ "${ALPHA}" == "true" ] &&
+[ "${ALPHA_VERSION}" == "" ] && echo "Exiting since the current selected options cannot build a valid image." && export UNSTABLE=1 && function_prop UNSTABLE 1 && exit 1
+
+export JOB=${JOB_BASE_NAME}; echo ${JOB}
+
+# Work out the proper device and arch for the image using the job name
+function_image() {
+    DEVICE=`find projects -iname "${JOB}" -print | tail -n 1 | awk -F"/" '{print $4}' | tr -d '[:space:]'`
+    [ -z "${DEVICE}" ] && DEVICE=EMPTY && PROJECT="${JOB}" || PROJECT=`find projects -iname "${JOB}" -print | tail -n 1 | awk -F"/" '{print $2}' | tr -d '[:space:]'`
+
+    ARCH=`grep -o "x86_64" projects/${PROJECT}/options | tr -d '[:space:]'`
+    [ -z "${ARCH}" ] && ARCH="arm"; echo ${ARCH}; function_prop ARCH "${ARCH}" || ARCH="x86_64"; echo ${ARCH}; function_prop ARCH "${ARCH}"
+}
+
+# Determine if images are built, if not parse the local log for the failure so it can be posted to slack
+function_failure() {
+    arg1="$1"
+    arg2="$2"
+    if [[ "${arg1}" == "0" ]]; then
+        ILOG=`grep -B 10 -A 5 FAILURE: extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+        FLOG="grep -A 1 'The following log for this failure is available:' extra_build.log | tail -n 1 | sed -e 's/^[ \t]*//'"
+
+        if [[ "${ILOG}" == "" ]]; then
+            ILOG=`grep -B 1 -A 1 "ERROR: Project not found" extra_build.log | sed '$!{:a;N;s/\n/\t/;ta}'`
+        fi
+        export URL="${DEF} | Failure: ${ILOG}"; function_prop URL "${URL}"
+        PASS=1; function_prop PASS 1
+
+        # The groovy post plugin pulls in files, variables and executes scripts on the master. But everything we need is on a slave. So we
+        # copy what we need in the properties file to the master but first we delete anything that already exists. To keep things simple
+        # we will copy the files to the same directory path that exists on the slave
+        ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+        ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+        scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+
+        exit 1
+    elif [[ "${arg1}" == "3" ]]; then
+        export SLACK="#buildserver"; function_prop SLACK "${SLACK}"
+        export URL="${JOB} on ${MARK} | ERROR: Project not found"; function_prop URL "${URL}"
+        ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+        ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+        scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+
+        exit 3
+    else
+        PASS=0; function_prop PASS 0
+    fi
+}
+
+function_image
+
+# build slack channel (we need to convert the string to lower case for slack)
+SLACK="${PROJECT,,}"
+export SLACK="#buildserver-${SLACK}"; function_prop SLACK "${SLACK}"
+
+# Get list of availble branches, limit it to the most recent two excluding the master
+BRANCHES=`git branch -a | grep 'libreelec' | tail -n 2 | awk -F'/' '{print $3}' | sed -n -e 'H;${x;s/\n/ /g;s/^,  //;p;}' | awk '{ for (i=NF; i>1; i--) printf("%s ",$i); print $1; }'`
+
+# determine if this is a valid project that can be built, if not find a branch where it can be built and build it
+[[ "${JOB}" != "Generic" && "${JOB}" != *"RPi"* && "${JOB}" != *"Slice"* ]] && VALID=`scripts/uboot_helper ${PROJECT} ${JOB} | tee >(wc -l) | tail -n 1`
+
+if [[ "${BRANCH}" != "" ]]; then
+    while [ "${VALID}" == "0" ]; do
+        # We exit only if a specific branch is to be built and if the image cannot be built on that branch when ALPHA is set
+        # to true or TYPE is set to Tag because we don't want an image built desginated with a version but built from an unintended branch.
+        # unintended branch.
+        if [[ "${ALPHA}" == "true" ]] || [[ "${Type}" == "Tag" ]]; then
+            URL="${DEF} on ${MARK} | ERROR: Project not found"
+            PASS=3; function_prop PASS "${PASS}"
+            function_failure "${PASS}"
+        fi
+
+        for i in ${BRANCHES}; do
+            export BRANCH=`echo $i | awk '{$1=$1};1'`; function_prop BRANCH "${BRANCH}"
+
+            git checkout "${BRANCH}"
+
+            # Call the input function to determine if the device and arch are valid
+            function_image
+
+            [[ "${JOB}" != "Generic" && "${JOB}" != *"RPi"* && "${JOB}" != *"Slice"* ]] && VALID=`scripts/uboot_helper ${PROJECT} ${JOB} | tee >(wc -l) | tail -n 1`
+
+            # Exit the loop once we find the valid project for the branch
+            [[ "${VALID}" == "1" ]] && break 2
+        done
+    done
+
+    # Switch to the valid branch for the project only if the image cannot be built on the branch selected. If a tag is selected, goto
+    # failure function to exit since we do not want to switch the branch to something we do not want
+    if [[ "${Type}" == "Tag" ]]; then
+        function_failure 3
+    fi
+
+    git checkout "${BRANCH}"
+fi
+
+export LE_GIT_BRANCH=${BRANCH}; function_prop LE_GIT_BRANCH "${LE_GIT_BRANCH}"
+export LE_GIT_COMMIT=`git rev-parse --verify HEAD`; function_prop LE_GIT_COMMIT "${LE_GIT_COMMIT}"
+export LE_GIT_PREVIOUS_COMMIT=`git log -p | grep -v ${LE_GIT_COMMIT} | grep commit | head -n 1 | awk -F" " '{print $2}'`; function_prop LE_GIT_PREVIOUS_COMMIT "${LE_GIT_PREVIOUS_COMMIT}"
+export LE_GIT_URL=`git remote -v | sed -n '/github.com.*push/{s/^[^[:space:]]\+[[:space:]]\+//;s|git@github.com:|https://github.com/|;s/\.git.*//;p}' | tail -n 1`; function_prop LE_GIT_URL "${LE_GIT_URL}"
+export LE_GIT_COMMIT_MESSAGE=`git log -1 --pretty=%B`; function_prop LE_GIT_MESSAGE "${LE_GIT_MESSAGE}"
+export GIT_BRANCH=${LE_GIT_BRANCH}
+export GIT_COMMIT=${LE_GIT_COMMIT}
+export GIT_PREVIOUS_COMMIT=${LE_GIT_PREVIOUS_COMMIT}
+
+export JOB=${JOB_BASE_NAME}; echo ${JOB}; function_prop JOB "${JOB}"
+
+function_image
+
+# Build out the input parameters for the image based upon the Jenkins job name
+if [[ "${DEVICE}" == "EMPTY" ]]; then
+    export PROJECT="${PROJECT}"; function_prop PROJECT "${PROJECT}"
+    export DEF="${PROJECT}"; function_prop DEF "${PROJECT}"
+    [ "${BRANCH}" == "master" ] && [ "${PROJECT}" == "Amlogic" ] && PROJECT="Amlogic_Legacy"; function_prop PROJECT "${PROJECT}"
+    DEVICE=""
+else
+    export PROJECT="${PROJECT}"; function_prop PROJECT "${PROJECT}"
+    export DEVICE="${DEVICE}"; function_prop DEVICE "${DEVICE}"
+    export DEF="${DEVICE}"; function_prop DEF "${DEVICE}"
+fi
+
+# Check whether the image is using U-Boot, we will need to know this later
+case "${PROJECT}" in
+    Allwinner|Amlogic|NXP|Qualcomm|Rockchip)
+        MANIFEST=`scripts/uboot_helper "${PROJECT}" "${JOB}"`
+        export MANIFEST=${MANIFEST}; function_prop MANIFEST "${MANIFEST}"
+        case "${MANIFEST}" in
+            "")
+                U=N
+            ;;
+            *)
+                U=Y
+            ;;
+        esac
+        case "${JOB_BASE_NAME}" in
+            # Revert U-Boot back to N since we wouldn't build either of these separately. They would be build in a group with other images.
+            MiQi|TinkerBoard)
+                U=N
+            ;;
+        esac
+    ;;
+esac
+
+function_prop UBOOT "${U}"
+
+# Determine if we are building RPi and if so build the noobs images
+[[ ${DEVICE} =~ "RPi" ]] && export NOOBS=noobs && function_prop NOOBS "${NOOBS}"
+
+
+# Export some more variables so they can be used in the build and export them to the env.properties file
+export R=`git rev-list HEAD --count`; function_prop HEAD "r${R}"
+export LE_VER=`cat distributions/LibreELEC/version | grep OS_VERSION | awk -F"\"" '{print $2}' | tail -n 1`; function_prop LE_VER "${LE_VER}"
+
+
+# Set default build parameters when triggered by SCM change
+if [[ "${BUILD_CAUSE}" == "SCMTRIGGER" || "${BUILD_CAUSE}" == "TIMERTRIGGER" ]]; then
+    CONCURRENCY_MAKE_LEVEL=4
+    PERIODIC=nightly
+fi
+
+# Build weekly file name, to be useed if the option weekly is selected
+if [[ ${BRANCH} != "" ]]; then
+    DOW=`date +%w`
+    WEEK=`date +%U`
+    WEEKLY=`date +"%Y"`
+    PRIORWEEK=`date +"%Y" -d "last sunday"`
+    export WEEKLY=`echo ${LE_VER}-weekly-${WEEKLY}${WEEK}`; function_prop WEEKLY "${WEEKLY}"
+fi
+
+# Disable ccache on all builds, this may inadvertently cause builds to fail due to the number of builds we run.
+export CCACHE_DISABLE=1; function_prop CCACHE_DISABLE 1
+
+
+# Determine how the image will be built for sources and target and on which jenkins system
+echo "Determine which build server we are on to define SOURCES and TARGET"
+if [[ "${PR}" != "" ]]; then
+    sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"pr${MARK}\"/ distributions/LibreELEC/version
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}/PR"
+    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}/PR"
+    else
+        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
+        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
+        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
+    fi
+elif [[ "${GC}" != "" ]]; then
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}/GC"
+    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}/GC"
+    else
+        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
+        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
+        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
+    fi
+elif [[ "${ALPHA}" == "true" ]]; then
+    sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"${ALPHA_VERSION}\"/ distributions/LibreELEC/version
+    echo "OFFICIAL=\"yes\"" >> distributions/LibreELEC/version
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}/upload"
+    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}/upload"
+    else
+        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
+        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
+        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
+    fi
+elif [[ "${ALPHA}" == "false" ]]; then
+    if [[ "${Type}" == "Tag" ]]; then
+        sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"${TAG}\"/ distributions/LibreELEC/version
+        echo "OFFICIAL=\"yes\"" >> distributions/LibreELEC/version
+    fi
+    if [[ "${NODE_NAME}" == build1 ]]; then
+        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
+        TARGET_DIR="${BUILD1_TARGET_DIR}"
+    elif [[ "${NODE_NAME}" == build[2-5] ]]; then
+        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
+        TARGET_DIR="${BUILD2_TARGET_DIR}"
+    else
+        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
+        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
+        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
+    fi
+fi
+
+# Cleanup the build log file if it previously exists. If we don't we may produce false failures when builds fail without a real FAILURE:
+ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+
+# Now we build the image(s) but we also tee it and force it to exit with a 0 so that we can capture the failure
+# and post to slack later. A none 0 exit from a command will trigger Jenkins to stop building immediately and
+# any further processing of the build exec is stopped even though we need to do other things. We do this by
+# writing out to a local build log that is easily accessible. If one exists we will remove it first.
+[[ -f extra_build.log ]] && rm -Rf extra_build.log || true
+PROJECT=${PROJECT} DEVICE=${DEVICE} ARCH=${ARCH} SOURCES_DIR=${SOURCES_DIR} TARGET_DIR=${TARGET_DIR} CONCURRENCY_MAKE_LEVEL=${CONCURRENCY_MAKE_LEVEL} BUILD_PERIODIC=${PERIODIC} make image ${NOOBS} 2>&1 | tee extra_build.log
+
+# We determine the file name for each of the image types we are building.
+if [[ "${BRANCH}" != "" ]]; then
+    export BASE="LibreELEC-${DEF}.${ARCH}"; function_prop BASE "${BASE}"
+    if [[ "${U}" == "Y" ]]; then
+         if [[ "${ALPHA}" == "true" ]]; then
+             export FILENAME="${BASE}-${ALPHA_VERSION}"; function_prop FILENAME "${FILENAME}"
+         else
+             export BUILDNAME=`cat "build.LibreELEC-${DEF}.${ARCH}-${LE_VER}-devel/BUILD_FILENAME"`; function_prop BUILDNAME "${BUILDNAME}"
+             export FILENAME="${BUILDNAME}"; function_prop FILENAME "${FILENAME}"
+        fi
+    else
+        if [[ "${ALPHA}" == "true" ]]; then
+            if [[ "${JOB_BASE_NAME}" == "MiQi" ]] || [[ "${JOB_BASE_NAME}" == "TinkerBoard" ]]; then
+                export FILENAME="${BASE}-${ALPHA_VERSION}-rk3288"; function_prop FILENAME "${FILENAME}"
+            else
+                export FILENAME="${BASE}-${ALPHA_VERSION}"; function_prop FILENAME "${FILENAME}"
+            fi
+        else
+            export BUILDNAME=`cat "build.LibreELEC-${DEF}.${ARCH}-${LE_VER}-devel/BUILD_FILENAME"`; function_prop BUILDNAME "${BUILDNAME}"
+            export FILENAME="${BUILDNAME}"; function_prop FILENAME "${FILENAME}"
+        fi
+    fi
+elif [[ "${GC}" != "" ]]; then
+    # We build the GIT commit file name for the images
+    export BASE="LibreELEC-${DEF}.${ARCH}"; function_prop BASE "${BASE}"
+    export BUILDNAME=`cat "build.LibreELEC-${DEF}.${ARCH}-${LE_VER}-devel/BUILD_FILENAME"`; function_prop BUILDNAME "${BUILDNAME}"
+    export FILENAME="${BUILDNAME}"; function_prop FILENAME "${FILENAME}"
+elif [[ "${PR}" != "" ]]; then
+    # We build the filename for PR images
+    export BASE="LibreELEC-${DEF}.${ARCH}"; function_prop BASE "${BASE}"
+    export FILENAME="${BASE}-pr${PR}"; function_prop FILENAME "${FILENAME}"
+fi
+
+# Lets find the images we build. If there are none, we presume that the build failed. We call the failure function
+# regardless to check.
+FE=`ls "${TARGET_DIR}"/"${FILENAME}"* | wc -l`
+function_failure ${FE}
+
+
+# Save the target and sources directory info to the properties list
+export TARGET_DIR="${TARGET_DIR}"; function_prop TARGET_DIR "${TARGET_DIR}"
+export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
+
+
+# Construct URL if build is successful and transfer the images to the web server. This also need to be cleaned up with all of
+# the case statements in use. This will be replaced with ifs.
+if [[ ${BRANCH} != "" ]]; then
+    if [[ "${DEF}" == "Generic" ]]; then
+        if [[ "${ALPHA}" == "true" ]]; then
+            if [[ "${PASS}" == "0" ]]; then
+                if [[ "${ABT}" == "false" ]]; then
+                    export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz ${URLWEBSERVER}/upload/${FILENAME}.ova"; function_prop URL "${URL}"
+                    export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.tar>&nbsp;here&nbsp;</a> the img.gz can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> and the ova can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.ova>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
+
+                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                else
+                    echo "This was a test build for Alpha, not transferring to the web server."
+                fi
+            else
+                echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous ${ALPHA_VERSION} from web server."
+                export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous ${ALPHA_VERSION} from web server."; function_prop URL "${URL}"
+                export URLGROOVY="The build ${DEF} failed for this release ${MARK}."; function_prop URLGROOVY "${URLGROOVY}"
+            fi
+        else
+            if [[ "${PASS}" == "0" ]]; then
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz ${URLWEBSERVER}/${FILENAME}.ova"; function_prop URL "${URL}"
+
+                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
+                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+            else
+                echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."
+                export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."; function_prop URL "${URL}"
+            fi
+        fi
+    else
+        if [[ "${ALPHA}" == "true" ]]; then
+            if [[ "${PASS}" == "0" ]]; then
+                if [[ "${U}" == "Y" ]]; then
+                    if [[ "${ABT}" == "false" ]]; then
+                        for i in ${MANIFEST}
+                        do
+                            export FILENAME="${BASE}-${ALPHA_VERSION}-${i}"; function_prop FILENAME "${FILENAME}"
+                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz"
+                            SFURL="${SFURL} <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz>&nbsp;${i}&nbsp;</a>"
+                        done
+
+                        scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                        FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.tar"
+                        export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
+                        export URLGROOVY="The img.gz for ${DEF} can be found at: ${SFURL} for download."; function_prop URLGROOVY "${URLGROOVY}"
+                    else
+                        echo "This was a test build for Alpha, not transferring to the web server."
+                    fi
+                else
+                    if [[ "${ABT}" == "false" ]]; then
+                        if [[ "${NOOBS}" == "noobs" ]]; then
+                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}-noobs.tar ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz"; function_prop URL "${URL}"
+                            export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}-noobs.tar>&nbsp;here&nbsp;</a>, <a href=http://${URLWEBSERVER}/upload/${FILENAME}.tar>&nbsp;here&nbsp;</a> and <a href=http://${URLWEBSERVER}/upload/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> for download."; function_prop URLGROOVY "${URLGROOVY}"
+                        else
+                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/releases-staging/${FILENAME}.tar ${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz"; function_prop URL "${URL}"
+                            export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.tar>&nbsp;here&nbsp;</a> and the img.gz can be found <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
+                        fi
+                    else
+                        echo "This was a test build for Alpha, not transferring to the web server."
+                    fi
+                fi
+            else
+                echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous ${ALPHA_VERSION} from web server."
+                export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous ${ALPHA_VERSION} from web server."; function_prop URL "${URL}"
+                export URLGROOVY="The build ${DEF} failed for this Alpha."; function_prop URLGROOVY "${URLGROOVY}"
+            fi
+        else
+            if [[ "${PASS}" == "0" ]]; then
+                if [[ "${NOOBS}" == "noobs" ]]; then
+                    ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
+                    ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*. -type f -exec rm {} \;" || true
+                    export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz ${URLWEBSERVER}/${FILENAME}-noobs.tar" ; function_prop URL "${URL}"
+                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                else
+                    if [[ "${U}" == "Y" ]]; then
+                        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
+                        ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*.tar* -type f -exec rm {} \;" || true
+                        for i in ${MANIFEST}
+                        do
+                            export FILENAME="${BUILDNAME}-${i}"; function_prop FILENAME "${FILENAME}"
+                            ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*${i}.* -type f -exec rm {} \;" || true
+
+                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                            FURL="${FURL} ${URLWEBSERVER}/${FILENAME}.img.gz"
+                        done
+                        scp -P 4567 -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                        FURL="${FURL} ${URLWEBSERVER}/${BUILDNAME}.tar"
+
+                        export URL="Todays ${PERIODIC} for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
+                    else
+                        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
+                        ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                        export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz"; function_prop URL "${URL}"
+
+                        scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                    fi
+                fi
+            else
+                echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."
+                export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."; function_prop URL "${URL}"
+            fi
+        fi
+    fi
+fi
+
+if [[ ${GC} != "" ]]; then
+    if [[ "${DEF}" == "Generic" ]]; then
+        if [[ "${PASS}" == "0" ]]; then
+            ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+            export URL="The GIT commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz ${URLWEBSERVER}/upload/${FILENAME}.ova"; function_prop URL "${URL}"
+            ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/upload/" || true
+            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+        else
+            echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."
+            export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."; function_prop URL "${URL}"
+        fi
+    else
+        if [[ "${PASS}" == "0" ]]; then
+            if [[ "${U}" == "Y" ]]; then
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                for i in ${MANIFEST}
+                do
+                    # We build the 2nd part of the U-Boot file names and then transfer the images to the web server
+                    export FILENAME="${BUILDNAME}-${i}"; function_prop FILENAME "${FILENAME}"
+                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+                    FURL="${FURL} ${URLWEBSERVER}/upload/${FILENAME}.img.gz "
+                done
+                scp -P 4567 -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                FURL="${FURL} ${URLWEBSERVER}/${BUILDNAME}.tar "
+
+                export URL="The GIT Commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
+            else
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                export URL="The GIT Commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}-noobs.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz"; function_prop URL "${URL}"
+
+                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/upload/" || true
+                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+            fi
+        else
+            echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous GIT Commit from web server."
+            export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous GIT Commit from web server."; function_prop URL "${URL}"
+        fi
+    fi
+fi
+
+if [[ ${PR} != "" ]]; then
+    if [[ "${DEF}" == "Generic" ]]; then
+        if [[ "${PASS}" == "0" ]]; then
+                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
+                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+
+                export URL="with PR# ${MARK} for ${DEF} can be found at: ${URLWEBSERVER}/PR/${FILENAME}.tar ${URLWEBSERVER}/PR/${FILENAME}.img.gz ${URLWEBSERVER}/PR/${FILENAME}.ova"; function_prop URL "${URL}"
+                export URLGROOVY="The PR for ${DEF} can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> and the ova can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.ova>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
+        else
+                echo "Build failed, not removing previous PR from web server."
+                export URL="${DEF} was not successful!"; function_prop URL "${URL}"
+                export URLGROOVY="The build ${DEF} failed for this PR."; function_prop URLGROOVY "${URLGROOVY}"
+        fi
+    else
+        if [[ "${PASS}" == "0" ]]; then
+            if [[ "${U}" == "Y" ]]; then
+                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${BASE}-pr${MARK}* -type f -exec rm {} \;" || true
+
+                for i in ${MANIFEST}
+                do
+                    export FILENAME="${BASE}-pr${MARK}-${i}"; function_prop FILENAME "${FILENAME}"
+
+                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+
+                    FURL="${FURL} ${URLWEBSERVER}/PR/${FILENAME}.img.gz "
+                    SFURL="${SFURL} <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;${i}&nbsp;</a>"
+                done
+
+                scp -P 4567 -p ${TARGET_DIR}/${BASE}-pr${PR}.tar ${TARGET_DIR}/${BASE}-pr${PR}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+
+                FURL="${FURL} ${URLWEBSERVER}/PR/${BASE}-pr${MARK}.tar.gz "
+                SFURL="${SFURL} <a href=http://${URLWEBSERVER}/PR/${BASE}-pr${MARK}.tar>&nbsp;TAR&nbsp;</a>"
+
+                export URL="with PR# ${MARK} for ${DEF} can be found at: ${FURL}"; function_prop URL "${URL}"
+                export URLGROOVY="The pr${MARK} can be found at: ${SFURL} for download."; function_prop URLGROOVY "${URLGROOVY}"
+            else
+                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
+
+                export URL="with PR# ${MARK} for ${DEF} can be found at: ${URLWEBSERVER}/PR/${FILENAME}.tar ${URLWEBSERVER}/PR/${FILENAME}.img.gz ${URLWEBSERVER}/PR/${FILENAME}-noobs.tar"; function_prop URL "${URL}"
+                export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.tar>&nbsp;here&nbsp;</a>, the noobs <a href=http://${URLWEBSERVER}/PR/${FILENAME}-noobs.tar>&nbsp;here&nbsp;</a> and the img.gz can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
+
+                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
+                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+            fi
+        else
+             echo "Build failed, not removing previous PR from web server."
+             export URL="${DEF} was not successful with ${MARK}!"; function_prop URL "${URL}"
+             export URLGROOVY="The build ${DEF} failed for this PR."; function_prop URLGROOVY "${URLGROOVY}"
+        fi
+    fi
+fi
+
+# Cleanup the workspace
+if [[ "${Clean}" == "make_distclean" ]]; then
+    sleep 15
+    rm -R packages/*
+    make distclean
+elif [[ "${Clean}" == "make_clean" ]]; then
+    make clean
+else
+    echo "Not cleaning build"
+fi
+
+
+printenv
