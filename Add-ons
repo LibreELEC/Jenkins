@@ -364,24 +364,20 @@ fi
 if [[ "${BRANCH}" != "" ]]; then
     if [[ "$PASS" == "0" ]]; then
         if [[ "${Remove_Previous_Plugin}" == "yes" ]]; then
-            if [[ "${PLUGIN}" != "all" ]]; then
-                if [[ "${PLUGIN}" != "official" ]]; then
-                    if [[ "${PLUGIN}" != "binary" ]]; then
-                        ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                        AddonList=`ls "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-*`
-                        for i in ${AddonList}
-                        do
-                            echo ${i}
-                            scp -P 4567 -p ${i} jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                            rm ${i} || true
-                        done
-                   else
-                        ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                        scp -P 4567 -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                        rm "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" || true
-                        URL="${DEF} | Success: ${PLUGIN} - single plugin build"; function_prop URL "${URL}"
-                   fi
-                fi
+            if [[ "${PLUGIN}" == "all" || "${PLUGIN}" == "official" || "${PLUGIN}" == "binary" ]]; then
+                ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                AddonList=`ls "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-*`
+                for i in ${AddonList}
+                do
+                    echo ${i}
+                    scp -P 4567 -p ${i} jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                    rm ${i} || true
+                done
+            else
+                ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                scp -P 4567 -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                rm "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" || true
+                URL="${DEF} | Success: ${PLUGIN} - single plugin build"; function_prop URL "${URL}"
             fi
         else
             URL="${URL} | Jenkins add-ons not built, not copied"; function_prop URL "${URL}"
