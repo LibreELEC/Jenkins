@@ -32,9 +32,9 @@ function_end() {
     # The groovy post plugin pulls in files, variables and executes scripts on the master. But everything we need is on a slave. So we
     # copy what we need in the properties file to the master but first we delete anything that already exists. To keep things simple
     # we will copy the files to the same directory path that exists on the slave
-    ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
-    ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
-    scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+    ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+    ssh ${USER}@${MASTERSERVER} -p${PORT} "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+    scp -P ${PORT} -p ${WORKSPACE}/LibreELEC.tv/env.properties ${USER}@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
 
     # Now we exit since we don't need to continue. The build will be marked as unstable instead of failure
     exit $(expr ${arg1} + 0)
@@ -245,17 +245,13 @@ if [[ "${PRBUILD}" == "true" ]] || [[ "${PLUGIN}" != "all" ]] || [[ "${PLUGIN}" 
     [ ! -f "packages/addons/${CATEGORY}/${PLUGIN}/package.mk" ] && (echo "Mark as unstable"; exit 0)
 
     # Check if architure matches
-    if [[ "${PLUGIN}" != "all" ]]; then
-        if [[ "${PLUGIN}" != "official" ]]; then
-            if [[ "${PLUGIN}" != "binary" ]]; then
-                export BUILD_CHECK=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_ARCH" | head -n 1 | awk -F"\"" '{print $2}'`
+    if [[ "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "${PLUGIN}" != "binary" ]]; then
+        export BUILD_CHECK=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_ARCH" | head -n 1 | awk -F"\"" '{print $2}'`
 
-                if [[ "${BUILD_CHECK}" != "${ARCH}" ]] && [[ "${BUILD_CHECK}" != "any" ]]; then
-                    export URL="${DEF} | Selected architecture ${ARCH}, doesn't match add-on package architecture ${BUILD_CHECK}"
-                    function_prop URL "${URL}"
-                    function_process 9999 "${URL}"
-                fi
-            fi
+        if [[ "${BUILD_CHECK}" != "${ARCH}" ]] && [[ "${BUILD_CHECK}" != "any" ]]; then
+            export URL="${DEF} | Selected architecture ${ARCH}, doesn't match add-on package architecture ${BUILD_CHECK}"
+            function_prop URL "${URL}"
+            function_process 9999 "${URL}"
         fi
     fi
 fi
@@ -331,7 +327,7 @@ fi
 Remove_Previous_Plugin="${Remove_Previous_Plugin,,}"; function_prop Remove_Previous_Plugin "${Remove_Previous_Plugin}"
 
 # Cleanup the build log file if it previously exists. If we don't we may produce false failures when builds fail without a real FAILURE:
-ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
 
 # Setup target directories to be sure they exist
 mkdir -p "${TARGET_DIR}"
@@ -352,7 +348,7 @@ export TARGET_DIR="${TARGET_DIR}"; function_prop TARGET_DIR "${TARGET_DIR}"
 export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
 
 # Determine which server we are copying the add-ons to
-if [[ "${JOB_BASE_NAME}" == "All_Add-ons" ]]; then
+if [[ "${Publish,,}" == "yes" ]]; then
     SRV=${ADDONSERVER}
     UDIR="/addons-staging"
 else
@@ -365,17 +361,17 @@ if [[ "${BRANCH}" != "" ]]; then
     if [[ "$PASS" == "0" ]]; then
         if [[ "${Remove_Previous_Plugin}" == "yes" ]]; then
             if [[ "${PLUGIN}" == "all" || "${PLUGIN}" == "official" || "${PLUGIN}" == "binary" ]]; then
-                ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
                 AddonList=`ls "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-*`
                 for i in ${AddonList}
                 do
                     echo ${i}
-                    scp -P 4567 -p ${i} jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                    scp -P ${PORT} -p ${i} ${USER}@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
                     rm ${i} || true
                 done
             else
-                ssh jenkins@${SRV} -p4567 "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                scp -P 4567 -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" jenkins@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                scp -P ${PORT} -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" ${USER}@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
                 rm "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" || true
                 URL="${DEF} | Success: ${PLUGIN} - single plugin build"; function_prop URL "${URL}"
             fi
@@ -391,8 +387,8 @@ elif [[ "${PRBUILD}" == "true" ]]; then
         export URL="${DEF} PR#${PR} ${PLUGIN} | Success: ${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}"; function_prop URL "${URL}"
         export URLGROOVY="${DEF} PR#${PR} ${PLUGIN} | Success: <a href=http://${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}> here </a> for download."; function_prop URLGROOVY "${URLGROOVY}"
 
-        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}" || true
-        scp -P 4567 -p ${TARGET_DIR}/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} jenkins@${WEBSERVER}:/var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} || true
+        ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}" || true
+        scp -P ${PORT} -p ${TARGET_DIR}/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} ${USER}@${WEBSERVER}:/var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} || true
     else
         echo "Build failed, not removing previous PR from web server."
         export URL="${DEF} | Failed: PR#${PR} ${PLUGIN}"; function_prop URL "${URL}"

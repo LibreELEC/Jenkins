@@ -138,17 +138,17 @@ function_failure() {
         # The groovy post plugin pulls in files, variables and executes scripts on the master. But everything we need is on a slave. So we
         # copy what we need in the properties file to the master but first we delete anything that already exists. To keep things simple
         # we will copy the files to the same directory path that exists on the slave
-        ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
-        ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
-        scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+        scp -P ${PORT} -p ${WORKSPACE}/LibreELEC.tv/env.properties ${USER}@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
 
         exit 1
     elif [[ "${arg1}" == "3" ]]; then
         export SLACK="#buildserver"; function_prop SLACK "${SLACK}"
         export URL="${JOB} on ${MARK} | ERROR: Project not found"; function_prop URL "${URL}"
-        ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
-        ssh jenkins@${MASTERSERVER} -p4567 "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
-        scp -P 4567 -p ${WORKSPACE}/LibreELEC.tv/env.properties jenkins@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+        scp -P ${PORT} -p ${WORKSPACE}/LibreELEC.tv/env.properties ${USER}@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
 
         exit 3
     else
@@ -340,7 +340,7 @@ elif [[ "${ALPHA}" == "false" ]]; then
 fi
 
 # Cleanup the build log file if it previously exists. If we don't we may produce false failures when builds fail without a real FAILURE:
-ssh jenkins@${MASTERSERVER} -p4567 "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
 
 # Now we build the image(s) but we also tee it and force it to exit with a 0 so that we can capture the failure
 # and post to slack later. A none 0 exit from a command will trigger Jenkins to stop building immediately and
@@ -403,7 +403,7 @@ if [[ ${BRANCH} != "" ]]; then
                     export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz ${URLWEBSERVER}/upload/${FILENAME}.ova"; function_prop URL "${URL}"
                     export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.tar>&nbsp;here&nbsp;</a> the img.gz can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> and the ova can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}.ova>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
 
-                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                    scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                 else
                     echo "This was a test build for Alpha, not transferring to the web server."
                 fi
@@ -414,11 +414,11 @@ if [[ ${BRANCH} != "" ]]; then
             fi
         else
             if [[ "${PASS}" == "0" ]]; then
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
                 export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz ${URLWEBSERVER}/${FILENAME}.ova"; function_prop URL "${URL}"
 
-                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
-                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/" || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
             else
                 echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."
                 export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."; function_prop URL "${URL}"
@@ -432,12 +432,12 @@ if [[ ${BRANCH} != "" ]]; then
                         for i in ${MANIFEST}
                         do
                             export FILENAME="${BASE}-${ALPHA_VERSION}-${i}"; function_prop FILENAME "${FILENAME}"
-                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                             FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz"
                             SFURL="${SFURL} <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz>&nbsp;${i}&nbsp;</a>"
                         done
 
-                        scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                        scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                         FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.tar"
                         export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
                         export URLGROOVY="The img.gz for ${DEF} can be found at: ${SFURL} for download."; function_prop URLGROOVY "${URLGROOVY}"
@@ -447,11 +447,11 @@ if [[ ${BRANCH} != "" ]]; then
                 else
                     if [[ "${ABT}" == "false" ]]; then
                         if [[ "${NOOBS}" == "noobs" ]]; then
-                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                             export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}-noobs.tar ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz"; function_prop URL "${URL}"
                             export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/upload/${FILENAME}-noobs.tar>&nbsp;here&nbsp;</a>, <a href=http://${URLWEBSERVER}/upload/${FILENAME}.tar>&nbsp;here&nbsp;</a> and <a href=http://${URLWEBSERVER}/upload/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> for download."; function_prop URLGROOVY "${URLGROOVY}"
                         else
-                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/releases-staging || true
+                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                             export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/releases-staging/${FILENAME}.tar ${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz"; function_prop URL "${URL}"
                             export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.tar>&nbsp;here&nbsp;</a> and the img.gz can be found <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
                         fi
@@ -467,32 +467,32 @@ if [[ ${BRANCH} != "" ]]; then
         else
             if [[ "${PASS}" == "0" ]]; then
                 if [[ "${NOOBS}" == "noobs" ]]; then
-                    ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
-                    ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*. -type f -exec rm {} \;" || true
+                    ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/" || true
+                    ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/${BASE}*${PERIODIC}*. -type f -exec rm {} \;" || true
                     export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz ${URLWEBSERVER}/${FILENAME}-noobs.tar" ; function_prop URL "${URL}"
-                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                    scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
                 else
                     if [[ "${U}" == "Y" ]]; then
-                        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
-                        ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*.tar* -type f -exec rm {} \;" || true
+                        ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/" || true
+                        ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/${BASE}*${PERIODIC}*.tar* -type f -exec rm {} \;" || true
                         for i in ${MANIFEST}
                         do
                             export FILENAME="${BUILDNAME}-${i}"; function_prop FILENAME "${FILENAME}"
-                            ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}*${i}.* -type f -exec rm {} \;" || true
+                            ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/${BASE}*${PERIODIC}*${i}.* -type f -exec rm {} \;" || true
 
-                            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
                             FURL="${FURL} ${URLWEBSERVER}/${FILENAME}.img.gz"
                         done
-                        scp -P 4567 -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                        scp -P ${PORT} -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
                         FURL="${FURL} ${URLWEBSERVER}/${BUILDNAME}.tar"
 
                         export URL="Todays ${PERIODIC} for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
                     else
-                        ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/" || true
-                        ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                        ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/" || true
+                        ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
                         export URL="Todays nightly for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/${FILENAME}.tar ${URLWEBSERVER}/${FILENAME}.img.gz"; function_prop URL "${URL}"
 
-                        scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                        scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
                     fi
                 fi
             else
@@ -506,10 +506,10 @@ fi
 if [[ ${GC} != "" ]]; then
     if [[ "${DEF}" == "Generic" ]]; then
         if [[ "${PASS}" == "0" ]]; then
-            ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+            ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
             export URL="The GIT commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz ${URLWEBSERVER}/upload/${FILENAME}.ova"; function_prop URL "${URL}"
-            ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/upload/" || true
-            scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+            ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/upload/" || true
+            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 ${USER}@${WEBSERVER}:/var/www/test/upload || true
         else
             echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."
             export URL="Build ${DEF}, failed on ${NODE_NAME}, not removing previous nightly from web server."; function_prop URL "${URL}"
@@ -517,24 +517,24 @@ if [[ ${GC} != "" ]]; then
     else
         if [[ "${PASS}" == "0" ]]; then
             if [[ "${U}" == "Y" ]]; then
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
                 for i in ${MANIFEST}
                 do
                     # We build the 2nd part of the U-Boot file names and then transfer the images to the web server
                     export FILENAME="${BUILDNAME}-${i}"; function_prop FILENAME "${FILENAME}"
-                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+                    scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/test/upload || true
                     FURL="${FURL} ${URLWEBSERVER}/upload/${FILENAME}.img.gz "
                 done
-                scp -P 4567 -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${BUILDNAME}.tar ${TARGET_DIR}/${BUILDNAME}.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
                 FURL="${FURL} ${URLWEBSERVER}/${BUILDNAME}.tar "
 
                 export URL="The GIT Commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
             else
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/upload/${BASE}*${PERIODIC}* -type f -exec rm {} \;" || true
                 export URL="The GIT Commit for ${JOB_BASE_NAME} was built on ${NODE_NAME} and can be found at: ${URLWEBSERVER}/upload/${FILENAME}.tar ${URLWEBSERVER}/upload/${FILENAME}-noobs.tar ${URLWEBSERVER}/upload/${FILENAME}.img.gz"; function_prop URL "${URL}"
 
-                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/upload/" || true
-                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test/upload || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/upload/" || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test/upload || true
             fi
         else
             echo "Build ${DEF}, failed on ${NODE_NAME}, not removing previous GIT Commit from web server."
@@ -546,9 +546,9 @@ fi
 if [[ ${PR} != "" ]]; then
     if [[ "${DEF}" == "Generic" ]]; then
         if [[ "${PASS}" == "0" ]]; then
-                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
-                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.ova ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${TARGET_DIR}/${FILENAME}.ova.sha256 ${USER}@${WEBSERVER}:/var/www/test/PR || true
 
                 export URL="with PR# ${MARK} for ${DEF} can be found at: ${URLWEBSERVER}/PR/${FILENAME}.tar ${URLWEBSERVER}/PR/${FILENAME}.img.gz ${URLWEBSERVER}/PR/${FILENAME}.ova"; function_prop URL "${URL}"
                 export URLGROOVY="The PR for ${DEF} can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;here&nbsp;</a> and the ova can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.ova>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
@@ -560,20 +560,20 @@ if [[ ${PR} != "" ]]; then
     else
         if [[ "${PASS}" == "0" ]]; then
             if [[ "${U}" == "Y" ]]; then
-                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${BASE}-pr${MARK}* -type f -exec rm {} \;" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/PR/${BASE}-pr${MARK}* -type f -exec rm {} \;" || true
 
                 for i in ${MANIFEST}
                 do
                     export FILENAME="${BASE}-pr${MARK}-${i}"; function_prop FILENAME "${FILENAME}"
 
-                    scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+                    scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/test/PR || true
 
                     FURL="${FURL} ${URLWEBSERVER}/PR/${FILENAME}.img.gz "
                     SFURL="${SFURL} <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;${i}&nbsp;</a>"
                 done
 
-                scp -P 4567 -p ${TARGET_DIR}/${BASE}-pr${PR}.tar ${TARGET_DIR}/${BASE}-pr${PR}.tar.sha256 jenkins@${WEBSERVER}:/var/www/test || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${BASE}-pr${PR}.tar ${TARGET_DIR}/${BASE}-pr${PR}.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test || true
 
                 FURL="${FURL} ${URLWEBSERVER}/PR/${BASE}-pr${MARK}.tar.gz "
                 SFURL="${SFURL} <a href=http://${URLWEBSERVER}/PR/${BASE}-pr${MARK}.tar>&nbsp;TAR&nbsp;</a>"
@@ -581,13 +581,13 @@ if [[ ${PR} != "" ]]; then
                 export URL="with PR# ${MARK} for ${DEF} can be found at: ${FURL}"; function_prop URL "${URL}"
                 export URLGROOVY="The pr${MARK} can be found at: ${SFURL} for download."; function_prop URLGROOVY "${URLGROOVY}"
             else
-                ssh jenkins@${WEBSERVER} -p4567 "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "find /var/www/test/PR/${FILENAME}* -type f -exec rm {} \;" || true
 
                 export URL="with PR# ${MARK} for ${DEF} can be found at: ${URLWEBSERVER}/PR/${FILENAME}.tar ${URLWEBSERVER}/PR/${FILENAME}.img.gz ${URLWEBSERVER}/PR/${FILENAME}-noobs.tar"; function_prop URL "${URL}"
                 export URLGROOVY="The tar for ${DEF} can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.tar>&nbsp;here&nbsp;</a>, the noobs <a href=http://${URLWEBSERVER}/PR/${FILENAME}-noobs.tar>&nbsp;here&nbsp;</a> and the img.gz can be found <a href=http://${URLWEBSERVER}/PR/${FILENAME}.img.gz>&nbsp;here&nbsp;</a>for download."; function_prop URLGROOVY "${URLGROOVY}"
 
-                ssh jenkins@${WEBSERVER} -p4567 "mkdir -p /var/www/test/PR/" || true
-                scp -P 4567 -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 jenkins@${WEBSERVER}:/var/www/test/PR || true
+                ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/" || true
+                scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256  ${TARGET_DIR}/${FILENAME}-noobs.tar ${TARGET_DIR}/${FILENAME}-noobs.tar.sha256 ${USER}@${WEBSERVER}:/var/www/test/PR || true
             fi
         else
              echo "Build failed, not removing previous PR from web server."
