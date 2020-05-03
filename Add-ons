@@ -216,7 +216,7 @@ fi
 # We can only build one PR plugin at a time. If a PLUGIN that contains the possibility of building more than
 # one exists, we abort because we cannot handle it.
 if [[ "${PRBUILD}" == "true" ]]; then
-    if [[ "${PLUGIN}" == "all" ]] || [[ "${PLUGIN}" == "official" ]] || [[ "${PLUGIN}" == "binary" ]]; then
+    if [[ "${PLUGIN}" == "all" || "${PLUGIN}" == "official" || "${PLUGIN}" == "binary" ]]; then
         URL="${DEF} | WARNING: Only one add-on can be selected when building a PR"; function_prop URL "${URL}"
         function_process 9999 "${URL}"
     fi
@@ -224,7 +224,7 @@ fi
 
 # PR plugins are built individually. In order to determine the proper category and arch, we need to figure it out
 # from the package.mk file
-if [[ "${PRBUILD}" == "true" ]] || [[ "${PLUGIN}" != "all" ]] || [[ "${PLUGIN}" != "official" ]] || [[ "$PLUGIN}" != "binary" ]]; then
+if [[ "${PRBUILD}" == "true" || "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "$PLUGIN}" != "binary" ]]; then
     PKG=`cat packages/addons/**/${PLUGIN}/package.mk | grep '^PKG_SECTION' | head -n 1 | awk -F"\"" '{print $2}'`
     if [[ "${PKG}" == "" ]]; then
         CATD="EMPTY"
