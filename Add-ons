@@ -224,34 +224,36 @@ fi
 
 # PR plugins are built individually. In order to determine the proper category and arch, we need to figure it out
 # from the package.mk file
-if [[ "${PRBUILD}" == "true" || "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "$PLUGIN}" != "binary" ]]; then
-    PKG=`cat packages/addons/**/${PLUGIN}/package.mk | grep '^PKG_SECTION' | head -n 1 | awk -F"\"" '{print $2}'`
-    if [[ "${PKG}" == "" ]]; then
-        CATD="EMPTY"
-    fi
-
-
-    if [[ "${CATD}" == "EMPTY" ]]; then
-        export CATEGORY=`echo ${PLUGIN} | awk -F. '{print $1}'`; function_prop CATEGORY "${CATEGORY}"
-    else
-        export CATEGORY=`cat packages/addons/**/${PLUGIN}/package.mk | grep "^PKG_SECTION" | head -n 1 | awk -F'"' '{print $2}' | sed -e 's/\//./g' | awk -F. '{print $1}'`
-        if [[ "${CATEGORY}" == "virtual" ]]; then
-            export CATEGORY=tools ; echo ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
-        else
-            export ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
+if [[ "${PRBUILD}" == "true" ]]; then
+    if [[ "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "$PLUGIN}" != "binary" ]]; then
+        PKG=`cat packages/addons/**/${PLUGIN}/package.mk | grep '^PKG_SECTION' | head -n 1 | awk -F"\"" '{print $2}'`
+        if [[ "${PKG}" == "" ]]; then
+            CATD="EMPTY"
         fi
-    fi
 
-    [ ! -f "packages/addons/${CATEGORY}/${PLUGIN}/package.mk" ] && (echo "Mark as unstable"; exit 0)
 
-    # Check if architure matches
-    if [[ "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "${PLUGIN}" != "binary" ]]; then
-        export BUILD_CHECK=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_ARCH" | head -n 1 | awk -F"\"" '{print $2}'`
+        if [[ "${CATD}" == "EMPTY" ]]; then
+            export CATEGORY=`echo ${PLUGIN} | awk -F. '{print $1}'`; function_prop CATEGORY "${CATEGORY}"
+        else
+            export CATEGORY=`cat packages/addons/**/${PLUGIN}/package.mk | grep "^PKG_SECTION" | head -n 1 | awk -F'"' '{print $2}' | sed -e 's/\//./g' | awk -F. '{print $1}'`
+            if [[ "${CATEGORY}" == "virtual" ]]; then
+                export CATEGORY=tools ; echo ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
+            else
+                export ${CATEGORY}; function_prop CATEGORY "${CATEGORY}"
+            fi
+        fi
 
-        if [[ "${BUILD_CHECK}" != "${ARCH}" ]] && [[ "${BUILD_CHECK}" != "any" ]]; then
-            export URL="${DEF} | Selected architecture ${ARCH}, doesn't match add-on package architecture ${BUILD_CHECK}"
-            function_prop URL "${URL}"
-            function_process 9999 "${URL}"
+        [ ! -f "packages/addons/${CATEGORY}/${PLUGIN}/package.mk" ] && (echo "Mark as unstable"; exit 0)
+
+        # Check if architure matches
+        if [[ "${PLUGIN}" != "all" || "${PLUGIN}" != "official" || "${PLUGIN}" != "binary" ]]; then
+            export BUILD_CHECK=`cat packages/addons/${CATEGORY}/${PLUGIN}/package.mk | grep "PKG_ARCH" | head -n 1 | awk -F"\"" '{print $2}'`
+
+            if [[ "${BUILD_CHECK}" != "${ARCH}" ]] && [[ "${BUILD_CHECK}" != "any" ]]; then
+                export URL="${DEF} | Selected architecture ${ARCH}, doesn't match add-on package architecture ${BUILD_CHECK}"
+                function_prop URL "${URL}"
+                function_process 9999 "${URL}"
+            fi
         fi
     fi
 fi
