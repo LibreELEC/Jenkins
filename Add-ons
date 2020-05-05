@@ -352,7 +352,7 @@ export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
 # Determine which server we are copying the add-ons to
 if [[ "${Publish,,}" == "yes" ]]; then
     SRV=${ADDONSERVER}
-    UDIR="/addons-staging"
+    UDIR="/"
 else
     SRV=${WEBSERVER}
     UDIR="/"
