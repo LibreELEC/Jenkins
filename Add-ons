@@ -358,6 +358,16 @@ else
     UDIR="/"
 fi
 
+#Check whether there is enough space on the destination server
+USED=`ssh ${USER}@${SRV} -p${PORT} "df --output=pcent /var/www | tail -n 1 | sed 's/ //g'" || true`
+USED=`echo ${USED} | awk -F% '{print $1}'`
+USED=`expr ${USED} + 0`
+
+if [[ ${USED} -gt 95 ]]; then
+    URL="${DEF} | fatal: Not enough space on destination server"; function_prop URL "${URL}"
+    function_process 9999 "${URL}"
+fi
+
 # Copy the add-ons to the proper server
 if [[ "${BRANCH}" != "" ]]; then
     if [[ "$PASS" == "0" ]]; then
