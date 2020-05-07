@@ -151,6 +151,13 @@ function_failure() {
         scp -P ${PORT} -p ${WORKSPACE}/LibreELEC.tv/env.properties ${USER}@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
 
         exit 3
+    elif [[ "${arg1}" == "9999" ]]; then
+        export SLACK="#buildserver"; function_prop SLACK "${SLACK}"
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "find ${WORKSPACE}/LibreELEC.tv/env.properties -type f -exec rm {} \;" || true
+        ssh ${USER}@${MASTERSERVER} -p${PORT} "mkdir -p ${WORKSPACE}/LibreELEC.tv" || true
+        scp -P ${PORT} -p ${WORKSPACE}/LibreELEC.tv/env.properties ${USER}@${MASTERSERVER}:${WORKSPACE}/LibreELEC.tv/env.properties || true
+
+        exit 3
     else
         PASS=0; function_prop PASS 0
     fi
@@ -391,6 +398,16 @@ function_failure ${FE}
 # Save the target and sources directory info to the properties list
 export TARGET_DIR="${TARGET_DIR}"; function_prop TARGET_DIR "${TARGET_DIR}"
 export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
+
+#Check whether there is enough space on the destination server
+USED=`ssh ${USER}@${WEBSERVER} -p${PORT} "df --output=pcent /var/www | tail -n 1 | sed 's/ //g'" || true`
+USED=`echo ${USED} | awk -F% '{print $1}'`
+USED=`expr ${USED} + 0`
+
+if [[ ${USED} -gt 95 ]]; then
+    URL="${DEF} | fatal: Not enough space on destination server"; function_prop URL "${URL}"
+    function_failure 9999 "${URL}"
+fi
 
 
 # Construct URL if build is successful and transfer the images to the web server. This also need to be cleaned up with all of
