@@ -306,24 +306,11 @@ export CCACHE_DISABLE=1; function_prop CCACHE_DISABLE 1
 
 # Determine which build server we are on to define SOURCES and TARGET"
 if [[ "${BRANCH}" != "" ]]; then
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}"/all_addons
-    elif [[ "$NODE_NAME}" =~ build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}"/all_addons
-    else
-        TARGET_DIR="target"
-        SOURCES_DIR="sources"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}"/all_addons
 elif [[ "${PRBUILD}" == "true" ]]; then
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}/PR"
-    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}/PR"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}/PR"
 fi
 
 Remove_Previous_Plugin="${Remove_Previous_Plugin,,}"; function_prop Remove_Previous_Plugin "${Remove_Previous_Plugin}"
@@ -352,10 +339,10 @@ export SOURCES_DIR="${SOURCES_DIR}"; function_prop SOURCES_DIR "${SOURCES_DIR}"
 # Determine which server we are copying the add-ons to
 if [[ "${Publish,,}" == "yes" ]]; then
     SRV=${ADDONSERVER}
-    UDIR="/"
+    UDIR="addon-upload"
 else
     SRV=${WEBSERVER}
-    UDIR="/"
+    UDIR="test/addons"
 fi
 
 #Check whether there is enough space on the destination server
@@ -373,17 +360,17 @@ if [[ "${BRANCH}" != "" ]]; then
     if [[ "$PASS" == "0" ]]; then
         if [[ "${Remove_Previous_Plugin}" == "yes" ]]; then
             if [[ "${PLUGIN}" == "all" || "${PLUGIN}" == "official" || "${PLUGIN}" == "binary" ]]; then
-                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/${UDIR}/${ADDON_VER}" || true
                 AddonList=`ls "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-*`
                 for i in ${AddonList}
                 do
                     echo ${i}
-                    scp -P ${PORT} -p ${i} ${USER}@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                    scp -P ${PORT} -p ${i} ${USER}@${SRV}:"/var/www/${UDIR}/${ADDON_VER}" || true
                     rm ${i} || true
                 done
             else
-                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/addon-upload/${ADDON_VER}${UDIR}" || true
-                scp -P ${PORT} -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" ${USER}@${SRV}:"/var/www/addon-upload/${ADDON_VER}${UDIR}" || true
+                ssh ${USER}@${SRV} -p${PORT} "mkdir -p /var/www/${UDIR}/${ADDON_VER}" || true
+                scp -P ${PORT} -p "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" ${USER}@${SRV}:"/var/www/${UDIR}/${ADDON_VER}" || true
                 rm "${TARGET_DIR}"/jenkins/"${ADDON_VER}"-"${DEF}"-"${ARCH}"-"${PLUGIN_NAME}" || true
                 URL="${DEF} | Success: ${PLUGIN} - single plugin build"; function_prop URL "${URL}"
             fi
@@ -399,8 +386,8 @@ elif [[ "${PRBUILD}" == "true" ]]; then
         export URL="${DEF} PR#${PR} ${PLUGIN} | Success: ${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}"; function_prop URL "${URL}"
         export URLGROOVY="${DEF} PR#${PR} ${PLUGIN} | Success: <a href=http://${URLWEBSERVER}/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME}> here </a> for download."; function_prop URLGROOVY "${URLGROOVY}"
 
-        ssh ${USER}@${WEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}" || true
-        scp -P ${PORT} -p ${TARGET_DIR}/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} ${USER}@${WEBSERVER}:/var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} || true
+        ssh ${USER}@${URLWEBSERVER} -p${PORT} "mkdir -p /var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}" || true
+        scp -P ${PORT} -p ${TARGET_DIR}/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} ${USER}@${URLWEBSERVER}:/var/www/test/PR/addons/${ADDON_VER}/${DEF}/${ARCH}/${PLUGIN_DIR}/${PLUGIN_NAME} || true
     else
         echo "Build failed, not removing previous PR from web server."
         export URL="${DEF} | Failed: PR#${PR} ${PLUGIN}"; function_prop URL "${URL}"

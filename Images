@@ -291,59 +291,23 @@ export CCACHE_DISABLE=1; function_prop CCACHE_DISABLE 1
 echo "Determine which build server we are on to define SOURCES and TARGET"
 if [[ "${PR}" != "" ]]; then
     sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"pr${MARK}\"/ distributions/LibreELEC/version
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}/PR"
-    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}/PR"
-    else
-        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
-        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
-        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}/PR"
 elif [[ "${GC}" != "" ]]; then
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}/GC"
-    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}/GC"
-    else
-        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
-        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
-        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}/GC"
 elif [[ "${ALPHA}" == "true" ]]; then
     sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"${ALPHA_VERSION}\"/ distributions/LibreELEC/version
     echo "OFFICIAL=\"yes\"" >> distributions/LibreELEC/version
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}/upload"
-    elif [[ "${NODE_NAME}" =~ build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}/upload"
-    else
-        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
-        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
-        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}/upload"
 elif [[ "${ALPHA}" == "false" ]]; then
     if [[ "${Type}" == "Tag" ]]; then
         sed -i -e s/LIBREELEC_VERSION=\"devel\"/LIBREELEC_VERSION=\"${TAG}\"/ distributions/LibreELEC/version
         echo "OFFICIAL=\"yes\"" >> distributions/LibreELEC/version
     fi
-    if [[ "${NODE_NAME}" == build1 ]]; then
-        SOURCES_DIR="${BUILD1_SOURCES_DIR}"
-        TARGET_DIR="${BUILD1_TARGET_DIR}"
-    elif [[ "${NODE_NAME}" == build[2-5] ]]; then
-        SOURCES_DIR="${BUILD2_SOURCES_DIR}"
-        TARGET_DIR="${BUILD2_TARGET_DIR}"
-    else
-        echo "Unable to determine build server, SOURCES and TARGET will use defaults."
-        TARGET_DIR="${WORKSPACE}/LibreELEC.tv/target"
-        SOURCES_DIR="${WORKSPACE}/LibreELEC.tv/sources"
-    fi
+    SOURCES_DIR="${BUILD_SOURCES_DIR}"
+    TARGET_DIR="${BUILD_TARGET_DIR}"
 fi
 
 # Cleanup the build log file if it previously exists. If we don't we may produce false failures when builds fail without a real FAILURE:
