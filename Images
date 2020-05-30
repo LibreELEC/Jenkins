@@ -413,11 +413,12 @@ if [[ ${BRANCH} != "" ]]; then
                         for i in ${MANIFEST}
                         do
                             export FILENAME="${BASE}-${ALPHA_VERSION}-${i}"; function_prop FILENAME "${FILENAME}"
-                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
+                            scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.img.gz ${TARGET_DIR}/${FILENAME}.img.gz.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                             FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz"
                             SFURL="${SFURL} <a href=http://${URLWEBSERVER}/releases-staging/${FILENAME}.img.gz>&nbsp;${i}&nbsp;</a>"
                         done
 
+                        export FILENAME="${BASE}-${ALPHA_VERSION}-${i}"; function_prop FILENAME "${FILENAME}"
                         scp -P ${PORT} -p ${TARGET_DIR}/${FILENAME}.tar ${TARGET_DIR}/${FILENAME}.tar.sha256 ${USER}@${WEBSERVER}:/var/www/releases-staging || true
                         FURL="${FURL} ${URLWEBSERVER}/releases-staging/${FILENAME}.tar"
                         export URL="with Alpha ${ALPHA_VERSION} for ${DEF} was built on ${NODE_NAME} and can be found at: ${FURL}"; function_prop URL "${URL}"
